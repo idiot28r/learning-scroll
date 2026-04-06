@@ -163,28 +163,28 @@
         <div class="toggle-row">
             <span>Options</span>
             <label class="switch">
-                <input type="checkbox" id="setting-opt" onchange="handleGlobalRule()">
+                <input type="checkbox" id="setting-opt" onchange="handleGlobalRule('opt')">
                 <span class="slider"></span>
             </label>
         </div>
         <div class="toggle-row">
             <span>Correct Answer</span>
             <label class="switch">
-                <input type="checkbox" id="setting-ans" onchange="handleGlobalRule()">
+                <input type="checkbox" id="setting-ans" onchange="handleGlobalRule('ans')">
                 <span class="slider"></span>
             </label>
         </div>
         <div class="toggle-row">
             <span>Explanation</span>
             <label class="switch">
-                <input type="checkbox" id="setting-exp" onchange="handleGlobalRule()">
+                <input type="checkbox" id="setting-exp" onchange="handleGlobalRule('exp')">
                 <span class="slider"></span>
             </label>
         </div>
         <div class="toggle-row">
             <span>Analytics</span>
             <label class="switch">
-                <input type="checkbox" id="setting-ana" onchange="handleGlobalRule()">
+                <input type="checkbox" id="setting-ana" onchange="handleGlobalRule('ana')">
                 <span class="slider"></span>
             </label>
         </div>
@@ -198,6 +198,7 @@
     <script>
         let questionCounter = 0;
         const feed = document.getElementById('feed');
+        let isDragAction = false; // Protects clicks after swiping
 
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -206,17 +207,17 @@
 
         // --- STATE ENFORCEMENT & RULES ---
 
-        function handleGlobalRule() {
+        function handleGlobalRule(source) {
             const opt = document.getElementById('setting-opt');
             const ans = document.getElementById('setting-ans');
             const exp = document.getElementById('setting-exp');
             const ana = document.getElementById('setting-ana');
 
-            // Apply Dependency Rules
-            if (ana.checked) opt.checked = true;
-            if (!opt.checked) ana.checked = false;
-            if (exp.checked) ans.checked = true;
-            if (!ans.checked) exp.checked = false;
+            // Apply Dependency Rules cleanly by checking the source of the change
+            if (source === 'ana' && ana.checked) opt.checked = true;
+            if (source === 'opt' && !opt.checked) ana.checked = false;
+            if (source === 'exp' && exp.checked) ans.checked = true;
+            if (source === 'ans' && !ans.checked) exp.checked = false;
 
             // Update all cards
             document.querySelectorAll('.card').forEach(card => {
@@ -229,6 +230,8 @@
         }
 
         function toggleLocalSection(id, prefix) {
+            if (isDragAction) return; // Prevent tap if it was part of a swipe
+
             const card = document.querySelector(`.card[data-id="${id}"]`);
             const turningOn = card.dataset[prefix] !== 'true';
             card.dataset[prefix] = turningOn;
@@ -284,6 +287,8 @@
         // --- INTERACTION LOGIC ---
 
         function handleOptionClick(element, selectedIndex, correctIndex, cardId) {
+            if (isDragAction) return; // Prevent tap if it was part of a swipe
+
             const card = document.querySelector(`.card[data-id="${cardId}"]`);
             if (card.classList.contains('answered') || card.dataset.ans === 'true') return;
             
@@ -301,28 +306,25 @@
             renderCardState(cardId);
         }
 
-        // --- TOUCH / SWIPE TO READ LOGIC (WITH THRESHOLD) ---
+        // --- TOUCH / SWIPE TO READ LOGIC (NOW ALLOWS SWIPING ANYWHERE) ---
 
         let startX = 0, startY = 0, currentX = 0;
         let isSwiping = false, directionDetermined = false, swipeCard = null;
 
         feed.addEventListener('touchstart', e => {
             const card = e.target.closest('.card');
-            
-            // Prevent swipe if tapping on interactive elements inside the card
-            if (!card || e.target.closest('.toggle-btn') || e.target.closest('.option')) return;
+            if (!card) return; // Allows starting the swipe from ANYWHERE inside the card
             
             swipeCard = card;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
             isSwiping = true;
             directionDetermined = false;
+            isDragAction = false; // Reset drag flag
             
-            // Snap to finger immediately
             swipeCard.style.transition = 'none'; 
         }, { passive: true });
 
-        // Changed passive to false to allow preventDefault() when intentionally swiping horizontally
         feed.addEventListener('touchmove', e => {
             if (!isSwiping || !swipeCard) return;
             
@@ -331,26 +333,24 @@
             let diffX = currentX - startX;
             let diffY = currentY - startY;
 
-            // Wait until the user moves a tiny bit to determine intent
             if (!directionDetermined) {
                 if (Math.abs(diffX) > 10 || Math.abs(diffY) > 10) {
                     directionDetermined = true;
-                    // If vertical movement is greater than horizontal, they are scrolling
                     if (Math.abs(diffY) > Math.abs(diffX)) {
-                        isSwiping = false; // Cancel the swipe
+                        isSwiping = false; 
                         swipeCard.style.transition = 'transform 0.3s ease';
                         swipeCard.style.transform = `translateX(0)`;
                         swipeCard = null;
                         return;
                     }
                 } else {
-                    return; // Haven't crossed the 10px threshold yet
+                    return; 
                 }
             }
 
-            // If we are here, it is definitely a horizontal swipe.
-            // Prevent the browser from trying to scroll vertically at the same time.
-            if (e.cancelable) e.preventDefault();
+            // Flag as a drag to prevent accidental click events firing on touch release
+            isDragAction = true;
+            if (e.cancelable) e.preventDefault(); 
             
             swipeCard.style.transform = `translateX(${diffX}px)`;
         }, { passive: false });
@@ -362,7 +362,6 @@
             swipeCard.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s, filter 0.3s';
             swipeCard.style.transform = `translateX(0)`;
 
-            // Must have crossed the direction threshold AND swiped far enough
             if (directionDetermined && Math.abs(diffX) > 80) {
                 swipeCard.classList.toggle('read');
             }
@@ -370,6 +369,9 @@
             isSwiping = false;
             directionDetermined = false;
             swipeCard = null;
+
+            // Clear the drag flag after a tiny delay so the native click event doesn't register
+            setTimeout(() => { isDragAction = false; }, 50);
         });
 
         // --- UI GENERATION ---

@@ -218,7 +218,7 @@
             if (exp.checked) ans.checked = true;
             if (!ans.checked) exp.checked = false;
 
-            // Update all cards with new global states
+            // Update all cards
             document.querySelectorAll('.card').forEach(card => {
                 card.dataset.opt = opt.checked;
                 card.dataset.ans = ans.checked;
@@ -230,7 +230,6 @@
 
         function toggleLocalSection(id, prefix) {
             const card = document.querySelector(`.card[data-id="${id}"]`);
-            // Toggle the target state
             const turningOn = card.dataset[prefix] !== 'true';
             card.dataset[prefix] = turningOn;
 
@@ -244,7 +243,6 @@
             renderCardState(id);
         }
 
-        // The master rendering function for each card based on its dataset state
         function renderCardState(id) {
             const card = document.querySelector(`.card[data-id="${id}"]`);
             if (!card) return;
@@ -257,30 +255,25 @@
             const correctIndex = parseInt(card.dataset.correct);
             const isAnswered = card.classList.contains('answered');
 
-            // Toggle buttons visually active
             card.querySelector(`#btn-opt-${id}`).classList.toggle('active', opt);
             card.querySelector(`#btn-ans-${id}`).classList.toggle('active', ans);
             card.querySelector(`#btn-exp-${id}`).classList.toggle('active', exp);
             card.querySelector(`#btn-ana-${id}`).classList.toggle('active', ana);
 
-            // Toggle standard sections
             card.querySelector(`#sec-opt-${id}`).style.display = opt ? 'block' : 'none';
             card.querySelector(`#sec-exp-${id}`).style.display = exp ? 'block' : 'none';
             card.querySelector(`#sec-ana-${id}`).style.display = ana ? 'block' : 'none';
 
-            // Answer Logic (Inline vs Separate Tile)
             const ansSection = card.querySelector(`#sec-ans-${id}`);
             const optionsContainer = card.querySelector(`#sec-opt-${id}`);
             const options = optionsContainer.querySelectorAll('.option');
 
-            // Only show separate answer tile if answer should be visible BUT options are hidden
             ansSection.style.display = (ans && !opt) ? 'block' : 'none';
 
-            // Lock and highlight inline options if Answer is turned on, or user has answered
             if (ans || isAnswered) {
-                card.classList.add('answer-revealed'); // Triggers chart color update
-                optionsContainer.classList.add('locked'); // Disables tapping
-                options[correctIndex].classList.add('correct-reveal'); // Forces green highlight
+                card.classList.add('answer-revealed'); 
+                optionsContainer.classList.add('locked'); 
+                options[correctIndex].classList.add('correct-reveal'); 
             } else {
                 card.classList.remove('answer-revealed');
                 optionsContainer.classList.remove('locked');
@@ -292,61 +285,90 @@
 
         function handleOptionClick(element, selectedIndex, correctIndex, cardId) {
             const card = document.querySelector(`.card[data-id="${cardId}"]`);
-            // Prevent if already answered or options are locked via Answer toggle
             if (card.classList.contains('answered') || card.dataset.ans === 'true') return;
             
-            card.classList.add('answered'); // Permanent state for this session
+            card.classList.add('answered'); 
             
             if (selectedIndex !== correctIndex) {
-                element.classList.add('wrong-reveal'); // Highlight wrong choice
+                element.classList.add('wrong-reveal'); 
             }
 
-            // Auto-Explanation Check
             if (document.getElementById('setting-auto-exp').checked) {
                 card.dataset.exp = 'true';
-                card.dataset.ans = 'true'; // Rule enforcement
+                card.dataset.ans = 'true'; 
             }
 
             renderCardState(cardId);
         }
 
-        // --- TOUCH / SWIPE TO READ LOGIC ---
+        // --- TOUCH / SWIPE TO READ LOGIC (WITH THRESHOLD) ---
 
-        let startX = 0, currentX = 0, isSwiping = false, swipeCard = null;
+        let startX = 0, startY = 0, currentX = 0;
+        let isSwiping = false, directionDetermined = false, swipeCard = null;
 
         feed.addEventListener('touchstart', e => {
             const card = e.target.closest('.card');
-            if (!card) return;
+            
+            // Prevent swipe if tapping on interactive elements inside the card
+            if (!card || e.target.closest('.toggle-btn') || e.target.closest('.option')) return;
             
             swipeCard = card;
             startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
             isSwiping = true;
-            swipeCard.style.transition = 'none'; // Snap to finger immediately
+            directionDetermined = false;
+            
+            // Snap to finger immediately
+            swipeCard.style.transition = 'none'; 
         }, { passive: true });
 
+        // Changed passive to false to allow preventDefault() when intentionally swiping horizontally
         feed.addEventListener('touchmove', e => {
             if (!isSwiping || !swipeCard) return;
-            currentX = e.touches[0].clientX;
-            let diffX = currentX - startX;
             
-            // Apply horizontal drag transform
+            currentX = e.touches[0].clientX;
+            let currentY = e.touches[0].clientY;
+            let diffX = currentX - startX;
+            let diffY = currentY - startY;
+
+            // Wait until the user moves a tiny bit to determine intent
+            if (!directionDetermined) {
+                if (Math.abs(diffX) > 10 || Math.abs(diffY) > 10) {
+                    directionDetermined = true;
+                    // If vertical movement is greater than horizontal, they are scrolling
+                    if (Math.abs(diffY) > Math.abs(diffX)) {
+                        isSwiping = false; // Cancel the swipe
+                        swipeCard.style.transition = 'transform 0.3s ease';
+                        swipeCard.style.transform = `translateX(0)`;
+                        swipeCard = null;
+                        return;
+                    }
+                } else {
+                    return; // Haven't crossed the 10px threshold yet
+                }
+            }
+
+            // If we are here, it is definitely a horizontal swipe.
+            // Prevent the browser from trying to scroll vertically at the same time.
+            if (e.cancelable) e.preventDefault();
+            
             swipeCard.style.transform = `translateX(${diffX}px)`;
-        }, { passive: true });
+        }, { passive: false });
 
         feed.addEventListener('touchend', e => {
             if (!isSwiping || !swipeCard) return;
             let diffX = currentX - startX;
             
-            // Restore smooth transition for bounce back
             swipeCard.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s, filter 0.3s';
             swipeCard.style.transform = `translateX(0)`;
 
-            // Toggle read status if swiped further than threshold (80px)
-            if (Math.abs(diffX) > 80) {
+            // Must have crossed the direction threshold AND swiped far enough
+            if (directionDetermined && Math.abs(diffX) > 80) {
                 swipeCard.classList.toggle('read');
             }
 
             isSwiping = false;
+            directionDetermined = false;
             swipeCard = null;
         });
 
@@ -377,7 +399,6 @@
             card.dataset.id = data.id;
             card.dataset.correct = data.correctIndex;
             
-            // Setup default datasets based on global states
             card.dataset.opt = document.getElementById('setting-opt').checked;
             card.dataset.ans = document.getElementById('setting-ans').checked;
             card.dataset.exp = document.getElementById('setting-exp').checked;
@@ -385,11 +406,10 @@
 
             let optionsHTML = '';
             data.options.forEach((opt, index) => {
-                const prefix = String.fromCharCode(65+index); // A, B, C, D
+                const prefix = String.fromCharCode(65+index); 
                 optionsHTML += `<div class="option" onclick="handleOptionClick(this, ${index}, ${data.correctIndex}, ${data.id})"><strong>${prefix})</strong> <span style="flex:1; margin-left:10px;">${opt}</span></div>`;
             });
 
-            // Analytics Setup
             const cssVars = ['--c-correct', '--c-w1', '--c-w2', '--c-w3'];
             let gradientStops = [], legendHTML = '', currentPercentage = 0, mappedVars = [], wrongCounter = 1;
             
@@ -458,7 +478,6 @@
             renderCardState(data.id);
         }
 
-        // Infinite Scroll
         window.addEventListener('scroll', () => {
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 300) {
                 createCard();
@@ -466,7 +485,6 @@
             }
         });
 
-        // Initialization
         for(let i=0; i<4; i++) createCard();
 
     </script>
